@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fifth-Order Resonance Simulator</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#111;font:14px/1.4 Arial,Helvetica,sans-serif}
+main{max-width:1220px;margin:0 auto;padding:22px 24px 36px}
+header{margin:0 0 20px;padding:0 0 12px;border-bottom:1px solid #bbb}
+h1{font-size:22px;font-weight:600;margin:0}
+h2{font-size:15px;font-weight:600;margin:0 0 12px}
+p{margin:6px 0;color:#444}
+.layout{display:grid;grid-template-columns:270px minmax(0,1fr);gap:24px;align-items:start}
+.controls{padding:0 18px 0 0;border-right:1px solid #ccc}
+.field{margin:12px 0}
+label{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:5px}
+input{width:100%;accent-color:#333}
+input[type=number]{padding:5px 6px;border:1px solid #aaa;border-radius:0;background:#fff;color:#111;font:13px Arial,Helvetica,sans-serif}
+input[type=number]:focus{outline:1px solid #555;outline-offset:1px}
+button{padding:6px 10px;border:1px solid #888;border-radius:0;background:#eee;color:#111;font:13px Arial,Helvetica,sans-serif;cursor:pointer}
+button:hover{background:#e5e5e5}
+button:disabled{opacity:.5;cursor:default}
+.actions{display:flex;gap:7px;margin-top:14px}
+.note{font-size:12px;color:#444;margin-top:10px}
+.status{font-size:12px;min-height:1.4em;margin-top:9px;color:#333}
+.formula{font-family:Consolas,Monaco,monospace;border:1px solid #ccc;padding:9px;overflow:auto;color:#111;font-size:13px}
+hr{border:0;border-top:1px solid #ccc;margin:18px 0}
+.metric-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:0 0 18px;padding:0 0 12px;border-bottom:1px solid #bbb}
+.metric small{display:block;color:#444;font-size:12px;margin-bottom:4px}
+.metric strong{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums}
+.chart-panel{margin:0 0 20px}
+.chart-title{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px}
+.chart-title h2{margin:0}
+.chart-title small{color:#444;font-size:12px}
+canvas{width:100%;height:300px;display:block;background:#fff;border:1px solid #aaa}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:6px 8px;border-bottom:1px solid #ddd}
+th:first-child,td:first-child{text-align:left}
+th{font-size:12px;font-weight:600;background:#f2f2f2}
+.table-wrap{overflow:auto;max-height:320px;border-top:1px solid #aaa}
+@media(max-width:820px){main{padding:18px 12px 28px}.layout{grid-template-columns:1fr;gap:20px}.controls{padding:0 0 18px;border-right:0;border-bottom:1px solid #ccc}.metric-grid{gap:10px}.metric strong{font-size:15px}canvas{height:260px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Fifth-Order Resonance Simulator</h1>
+</header>
+<div class="layout">
+<aside class="panel controls">
+  <h2>Simulation parameters</h2>
+  <div class="field"><label for="xi">Detuning coefficient ξ <output id="xiOut">0.0200</output></label><input id="xi" type="number" step="0.001" value="0.02"></div>
+  <div class="field"><label for="kappa">Driving strength κ <output id="kOut">−0.0100</output></label><input id="kappa" type="number" step="0.001" value="-0.01"></div>
+  <div class="field"><label for="jstar">Fixed-point action J* <output id="jOut">1.000</output></label><input id="jstar" type="number" step="0.1" value="1"></div>
+  <div class="field"><label for="turns">Turns per particle</label><input id="turns" type="number" min="4096" max="262144" step="4096" value="32768"></div>
+  <div class="field"><label for="discard">Transient turns to discard</label><input id="discard" type="number" min="0" step="256" value="2048"></div>
+  <div class="field"><label for="count">Number of amplitudes</label><input id="count" type="number" min="5" max="25" step="1" value="13"></div>
+  <div class="actions"><button id="run">Run simulation</button><button class="secondary" id="reset">Reset defaults</button></div>
+  <div class="status" id="status" role="status">Ready. Adjust the parameters, then select “Run simulation”.</div>
+  <p class="note">For the stable fixed point at ψ*=0, require −2 &lt; 2 + 50πξκ &lt; 2. The fixed-point detuning is set automatically to ΔQ = −ξJ*.</p>
+  <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+  <h2>Map being simulated</h2>
+  <div class="formula">Jₙ₊₁ = Jₙ + 5κ sin(5ψₙ)<br>ψₙ₊₁ = ψₙ + 2π(ΔQ + ξJₙ₊₁)</div>
+  <p class="note">Kick followed by nonlinear rotation. The map is a composition of canonical transformations and preserves phase-space area.</p>
+</aside>
+<section>
+  <div class="metric-grid">
+    <div class="metric"><small>Theoretical small-amplitude QI</small><strong id="qi">—</strong></div>
+    <div class="metric"><small>Smallest-amplitude FFT tune</small><strong id="qnum">—</strong></div>
+    <div class="metric"><small>Relative difference</small><strong id="err">—</strong></div>
+  </div>
+  <div class="panel chart-panel">
+    <div class="chart-title"><h2>Island tune vs. initial action displacement</h2><small>FFT frequency · oscillations/turn</small></div>
+    <canvas id="tuneChart" width="900" height="330" aria-label="Tune versus amplitude graph"></canvas>
+  </div>
+  <div class="panel chart-panel">
+    <div class="chart-title"><h2>Phase-space trajectory</h2><small>Largest tested initial displacement</small></div>
+    <canvas id="phaseChart" width="900" height="330" aria-label="Phase-space trajectory graph"></canvas>
+  </div>
+  <div class="panel">
+    <div class="chart-title"><h2>Numerical results</h2><button class="secondary" id="csv" disabled>Export CSV</button></div>
+    <div class="table-wrap"><table><thead><tr><th>Initial |J₀ − J*|</th><th>Measured tune</th><th>Difference from QI</th></tr></thead><tbody id="results"><tr><td colspan="3" style="text-align:left;color:#a7b4cc">Run the simulation to populate results.</td></tr></tbody></table></div>
+  </div>
+</section>
+</div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const defaults = {xi:0.02,kappa:-0.01,jstar:1,turns:32768,discard:2048,count:13};
+let lastRows = [], lastPhase = null;
+
+function fmt(x,n=8){return Number.isFinite(x)?x.toFixed(n):"—";}
+function nextPow2(n){let p=1;while(p<n)p*=2;return p;}
+function fftTune(signal){
+  // Zero-pad to a power of two; radix-2 FFT, then parabolic peak interpolation.
+  const n=nextPow2(signal.length), re=new Float64Array(n), im=new Float64Array(n);
+  let mean=0;for(let i=0;i<signal.length;i++)mean+=signal[i];mean/=signal.length;
+  for(let i=0;i<signal.length;i++) re[i]=(signal[i]-mean)*(0.5-0.5*Math.cos(2*Math.PI*i/(signal.length-1)));
+  for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){[re[i],re[j]]=[re[j],re[i]];}}
+  for(let len=2;len<=n;len<<=1){
+    const angle=-2*Math.PI/len, wr0=Math.cos(angle),wi0=Math.sin(angle);
+    for(let i=0;i<n;i+=len){let wr=1,wi=0;
+      for(let j=0;j<len/2;j++){
+        const u=i+j,v=u+len/2,vr=re[v]*wr-im[v]*wi,vi=re[v]*wi+im[v]*wr;
+        re[v]=re[u]-vr;im[v]=im[u]-vi;re[u]+=vr;im[u]+=vi;
+        const nw=wr*wr0-wi*wi0;wi=wr*wi0+wi*wr0;wr=nw;
+      }
+    }
+  }
+  let peak=1,best=0;
+  for(let k=1;k<n/2;k++){const p=re[k]*re[k]+im[k]*im[k];if(p>best){best=p;peak=k;}}
+  const power=k=>re[k]*re[k]+im[k]*im[k];
+  let offset=0;
+  if(peak>0&&peak<n/2-1){const a=Math.log(power(peak-1)+1e-300),b=Math.log(power(peak)+1e-300),c=Math.log(power(peak+1)+1e-300),den=a-2*b+c;if(Math.abs(den)>1e-14)offset=.5*(a-c)/den;}
+  return (peak+offset)/n;
+}
+function track(dJ,p){
+  let J=p.jstar+dJ,psi=0;
+  const n=p.turns-p.discard,angles=new Float64Array(n),actions=new Float64Array(n);
+  for(let t=0;t<p.turns;t++){
+    J+=5*p.kappa*Math.sin(5*psi);
+    psi+=2*Math.PI*(p.dq+p.xi*J);
+    if(t>=p.discard){const i=t-p.discard;angles[i]=psi;actions[i]=J;}
+  }
+  return {angles,actions};
+}
+function drawChart(canvas,series,opts={}){
+  const ctx=canvas.getContext("2d"),w=canvas.width,h=canvas.height;
+  ctx.clearRect(0,0,w,h);ctx.fillStyle="#ffffff";ctx.fillRect(0,0,w,h);
+  const pad={l:72,r:22,t:20,b:52},pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+  const allX=series.flatMap(s=>Array.from(s.x)),allY=series.flatMap(s=>Array.from(s.y)).filter(Number.isFinite);
+  if(!allX.length||!allY.length){ctx.fillStyle="#65716b";ctx.font="16px system-ui";ctx.fillText("Run simulation to display this chart.",pad.l, h/2);return;}
+  let xmin=Math.min(...allX),xmax=Math.max(...allX),ymin=Math.min(...allY),ymax=Math.max(...allY);
+  if(opts.yline!==undefined){ymin=Math.min(ymin,opts.yline);ymax=Math.max(ymax,opts.yline);}
+  if(xmin===xmax){xmin-=1;xmax+=1;}if(ymin===ymax){ymin-=.01;ymax+=.01;}
+  const ym=(ymax-ymin)*.12;ymin-=ym;ymax+=ym;
+  const X=x=>pad.l+(x-xmin)/(xmax-xmin)*pw,Y=y=>pad.t+(ymax-y)/(ymax-ymin)*ph;
+  ctx.strokeStyle="#e2e7e3";ctx.fillStyle="#68736d";ctx.lineWidth=1;ctx.font="12px system-ui";
+  for(let i=0;i<=5;i++){const y=pad.t+i*ph/5,val=ymax-i*(ymax-ymin)/5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();ctx.fillText(val.toFixed(4),8,y+4);}
+  for(let i=0;i<=5;i++){const x=pad.l+i*pw/5,val=xmin+i*(xmax-xmin)/5;ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,h-pad.b);ctx.stroke();ctx.fillText(val.toFixed(3),x-15,h-pad.b+22);}
+  ctx.strokeStyle="#65716b";ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,h-pad.b);ctx.lineTo(w-pad.r,h-pad.b);ctx.stroke();
+  if(opts.yline!==undefined){ctx.strokeStyle="#a45b35";ctx.setLineDash([8,5]);ctx.beginPath();ctx.moveTo(pad.l,Y(opts.yline));ctx.lineTo(w-pad.r,Y(opts.yline));ctx.stroke();ctx.setLineDash([]);}
+  for(const s of series){ctx.strokeStyle=s.color||"#315f78";ctx.fillStyle=s.color||"#315f78";ctx.lineWidth=2;ctx.beginPath();for(let i=0;i<s.x.length;i++){const xx=X(s.x[i]),yy=Y(s.y[i]);if(i===0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);}ctx.stroke();if(s.points){for(let i=0;i<s.x.length;i++){ctx.beginPath();ctx.arc(X(s.x[i]),Y(s.y[i]),3.5,0,2*Math.PI);ctx.fill();}}}
+  ctx.fillStyle="#34443c";ctx.font="13px system-ui";ctx.fillText(opts.xlabel||"",w/2-60,h-8);
+  ctx.save();ctx.translate(17,h/2+35);ctx.rotate(-Math.PI/2);ctx.fillText(opts.ylabel||"",0,0);ctx.restore();
+}
+function run(){
+  const p={xi:Number($("xi").value),kappa:Number($("kappa").value),jstar:Number($("jstar").value),turns:Math.floor(Number($("turns").value)),discard:Math.floor(Number($("discard").value)),count:Math.floor(Number($("count").value))};
+  if(!Object.values(p).every(Number.isFinite)||p.xi===0||p.turns<4096||p.discard<0||p.discard>=p.turns||p.count<5||p.count>25){$("status").textContent="Check inputs: ξ ≠ 0, turns ≥ 4096, 0 ≤ discard < turns, and 5–25 amplitudes.";return;}
+  p.dq=-p.xi*p.jstar;
+  const tr=2+50*Math.PI*p.xi*p.kappa;
+  if(!(tr>-2&&tr<2)){$("status").textContent=`Chosen fixed point is not linearly stable (trace = ${tr.toFixed(5)}). Need −2 < trace < 2.`;return;}
+  $("run").disabled=true;$("status").textContent="Tracking particles and calculating FFT tunes…";
+  setTimeout(()=>{
+    try{
+      const qi=Math.acos(tr/2)/(2*Math.PI),amps=Array.from({length:p.count},(_,i)=>.001*Math.pow(500,i/(p.count-1)));
+      lastRows=[];let phase=null;
+      for(const a of amps){const t=track(a,p);lastRows.push({amp:a,tune:fftTune(t.angles)});phase=t;}
+      lastPhase=phase;
+      $("qi").textContent=fmt(qi,8);$("qnum").textContent=fmt(lastRows[0].tune,8);
+      $("err").textContent=fmt(Math.abs(lastRows[0].tune-qi)/qi*100,5)+"%";
+      $("results").innerHTML=lastRows.map(r=>`<tr><td>${r.amp.toFixed(4)}</td><td>${fmt(r.tune,8)}</td><td>${fmt(r.tune-qi,8)}</td></tr>`).join("");
+      drawChart($("tuneChart"),[{x:lastRows.map(r=>r.amp),y:lastRows.map(r=>r.tune),points:true}],{yline:qi,xlabel:"Initial action displacement |J₀ − J*|",ylabel:"Island tune"});
+      const stride=Math.max(1,Math.floor(lastPhase.actions.length/6000)),px=[],py=[];
+      for(let i=0;i<lastPhase.actions.length;i+=stride){px.push(((lastPhase.angles[i]%(2*Math.PI))+2*Math.PI)%(2*Math.PI));py.push(lastPhase.actions[i]);}
+      drawChart($("phaseChart"),[{x:px,y:py,color:"#a45b35"}],{xlabel:"Angle ψ (rad, modulo 2π)",ylabel:"Action J"});
+      $("csv").disabled=false;$("status").textContent=`Complete. ΔQ = ${p.dq.toFixed(6)}; linear trace = ${tr.toFixed(6)}.`;
+    }catch(e){$("status").textContent="Simulation error: "+e.message;}
+    $("run").disabled=false;
+  },30);
+}
+$("run").addEventListener("click",run);
+$("reset").addEventListener("click",()=>{for(const [k,v] of Object.entries(defaults))$(k).value=v;run();});
+$("csv").addEventListener("click",()=>{
+  const qi=Number($("qi").textContent),rows=["initial_action_displacement,measured_island_tune,difference_from_QI",...lastRows.map(r=>`${r.amp},${r.tune},${r.tune-qi}`)].join("\n");
+  const a=document.createElement("a"),url=URL.createObjectURL(new Blob([rows],{type:"text/csv"}));a.href=url;a.download="island_tune_data.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+for(const id of ["xi","kappa","jstar"]){$(id).addEventListener("input",()=>{$("xiOut").textContent=Number($("xi").value).toFixed(4);$("kOut").textContent=Number($("kappa").value).toFixed(4);$("jOut").textContent=Number($("jstar").value).toFixed(3);});}
+drawChart($("tuneChart"),[],{xlabel:"Initial action displacement",ylabel:"Island tune"});
+drawChart($("phaseChart"),[],{xlabel:"Angle ψ",ylabel:"Action J"});
+// Do not launch the full FFT calculation during page startup.
+// This keeps the interface responsive on slower machines.
+window.addEventListener("error", event => {
+  const status = $("status");
+  if (status) status.textContent = "Page error: " + (event.message || "An unexpected error occurred.");
+});
+</script>
+</body>
+</html>
