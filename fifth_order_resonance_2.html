@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fifth-Order Resonance Simulator — Five-Turn Map</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#111;font:14px/1.45 Arial,Helvetica,sans-serif}
+main{max-width:1280px;margin:0 auto;padding:22px 24px 36px}
+header{margin:0 0 20px;padding:0 0 12px;border-bottom:1px solid #bbb}
+h1{font-size:22px;font-weight:600;margin:0}
+h2{font-size:15px;font-weight:600;margin:0 0 12px}
+p{margin:7px 0;color:#444}
+.layout{display:grid;grid-template-columns:290px minmax(0,1fr);gap:24px;align-items:start}
+.controls{padding:0 18px 0 0;border-right:1px solid #ccc}
+.field{margin:12px 0}
+label{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:5px}
+input{width:100%;accent-color:#333}
+input[type=number]{padding:5px 6px;border:1px solid #aaa;border-radius:0;background:#fff;color:#111;font:13px Arial,Helvetica,sans-serif}
+input[type=number]:focus{outline:1px solid #555;outline-offset:1px}
+button{padding:6px 10px;border:1px solid #888;border-radius:0;background:#eee;color:#111;font:13px Arial,Helvetica,sans-serif;cursor:pointer}
+button:hover{background:#e5e5e5}
+button:disabled{opacity:.5;cursor:default}
+.actions{display:flex;gap:7px;margin-top:14px;flex-wrap:wrap}
+.note{font-size:12px;color:#444;margin-top:9px}
+.status{font-size:12px;min-height:1.4em;margin-top:9px;color:#333}
+.formula{font-family:Consolas,Monaco,monospace;border:1px solid #ccc;padding:9px;overflow:auto;color:#111;font-size:12px;line-height:1.65;background:#fff}
+hr{border:0;border-top:1px solid #ccc;margin:18px 0}
+.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:0 0 18px;padding:0 0 12px;border-bottom:1px solid #bbb}
+.metric small{display:block;color:#444;font-size:12px;margin-bottom:4px}
+.metric strong{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.chart-panel{margin:0 0 20px}
+.chart-title{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px}
+.chart-title h2{margin:0}
+.chart-title small{color:#444;font-size:12px;text-align:right}
+canvas{width:100%;height:310px;display:block;background:#fff;border:1px solid #aaa}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:6px 8px;border-bottom:1px solid #ddd}
+th:first-child,td:first-child{text-align:left}
+th{font-size:12px;font-weight:600;background:#f2f2f2}
+.table-wrap{overflow:auto;max-height:320px;border-top:1px solid #aaa}
+.explain{border-top:1px solid #bbb;margin-top:20px;padding-top:14px}
+.explain p{font-size:13px}
+@media(max-width:940px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:820px){main{padding:18px 12px 28px}.layout{grid-template-columns:1fr;gap:20px}.controls{padding:0 0 18px;border-right:0;border-bottom:1px solid #ccc}.metric-grid{gap:10px}canvas{height:270px}}
+</style>
+</head>
+<body>
+<main>
+<header><h1>Fifth-Order Resonance Simulator</h1></header>
+<div class="layout">
+<aside class="panel controls">
+  <h2>Resonant Hamiltonian parameters</h2>
+  <div class="field"><label for="alpha">Octupole detuning α <output id="alphaOut">0.05000</output></label><input id="alpha" type="number" step="0.001" value="0.05"></div>
+  <div class="field"><label for="v5">Decapole drive V₅ <output id="v5Out">−0.00200</output></label><input id="v5" type="number" step="0.001" value="-0.002"></div>
+  <div class="field"><label for="jstar">Reference fixed-point action J<sub>fp</sub> <output id="jOut">0.500</output></label><input id="jstar" type="number" min="0.000001" step="0.05" value="0.5"></div>
+  <div class="field"><label for="turns">Turns to track (rounded to 5)</label><input id="turns" type="number" min="5000" max="100000" step="5000" value="30000"></div>
+  <div class="field"><label for="discard">Transient turns to discard (rounded to 5)</label><input id="discard" type="number" min="0" step="500" value="2000"></div>
+  <div class="field"><label for="count">Number of initial amplitudes</label><input id="count" type="number" min="5" max="25" step="1" value="13"></div>
+  <div class="actions"><button id="run">Run simulation</button><button id="reset" class="secondary">Reset defaults</button></div>
+  <div class="status" id="status" role="status">Ready. Adjust the parameters, then select “Run simulation”.</div>
+  <p class="note">The detuning δ is set so (J<sub>fp</sub>, ψ<sub>fp</sub>) is an island centre. Q₀ = 1/5 + δ is the bare tune used for D₅; nonlinear detuning brings the fixed point onto the 1/5 resonance.</p>
+  <hr>
+  <h2>Hamiltonian and one-turn dynamics</h2>
+  <div class="formula">
+    H = 2πδJ + (α/2)J² + V₅J<sup>5/2</sup>cos(5ψ)<br>
+    dJ/dn = 5V₅J<sup>5/2</sup>sin(5ψ)<br>
+    dψ/dn = 2πδ + αJ + (5/2)V₅J<sup>3/2</sup>cos(5ψ)
+  </div>
+  <p class="note">The fast frame rotation R(2π/5) is removed during integration; R(2π/5)⁵ = I. The displayed stroboscopic phase-space samples are taken once every five turns, when the laboratory and rotating-frame angles coincide modulo 2π.</p>
+  <hr>
+  <h2>Coefficient correspondence</h2>
+  <div class="formula">
+    α = 2πξ<br>
+    κ<sub>eff</sub>(J<sub>fp</sub>) = V₅J<sub>fp</sub><sup>5/2</sup><br>
+    Q<sub>I</sub> ≈ (5/2π)J<sub>fp</sub><sup>5/4</sup>√|αV₅|
+  </div>
+  <p class="note">Unlike a constant κ kick, the decapole drive scales as J<sup>5/2</sup>. Its action derivative also contributes to the angle equation.</p>
+</aside>
+<section>
+  <div class="metric-grid">
+    <div class="metric"><small>Small-amplitude island tune Q<sub>I</sub> (linearized)</small><strong id="qi">—</strong></div>
+    <div class="metric"><small>Numerical Q<sub>I</sub> (smallest amplitude)</small><strong id="qnum">—</strong></div>
+    <div class="metric"><small>Fifth-order small divisor D₅</small><strong id="divisor">—</strong></div>
+    <div class="metric"><small>Five-turn coherent factor</small><strong id="coherence">—</strong></div>
+  </div>
+  <div class="panel chart-panel">
+    <div class="chart-title"><h2>Island tune vs. libration amplitude</h2><small>FFT of J sampled every 5 turns · tune reported per turn</small></div>
+    <canvas id="tuneChart" width="1000" height="340" aria-label="Island tune versus initial action displacement"></canvas>
+  </div>
+  <div class="panel chart-panel">
+    <div class="chart-title"><h2>Five-turn phase-space map</h2><small>Unconnected map points · resonant angle normalized by 2π</small></div>
+    <canvas id="phaseChart" width="1000" height="340" aria-label="Five-turn phase-space scatter plot"></canvas>
+  </div>
+  <div class="panel">
+    <div class="chart-title"><h2>Numerical results</h2><button id="csv" class="secondary" disabled>Export CSV</button></div>
+    <div class="table-wrap"><table><thead><tr><th>Initial |J₀ − J<sub>fp</sub>|</th><th>Measured Q<sub>I</sub> per turn</th><th>Difference from linearized Q<sub>I</sub></th></tr></thead><tbody id="results"><tr><td colspan="3" style="text-align:left;color:#777">Run the simulation to populate results.</td></tr></tbody></table></div>
+  </div>
+  <div class="explain">
+    <h2>Resonance diagnostics</h2>
+    <p id="diagnostics">After a run, this section reports the bare tune Q₀ = 1/5 + δ, the fifth-order divisor |1 − exp(i10πQ₀)|, the five-turn coherent sum, and the pendulum estimate of the action half-width.</p>
+  </div>
+</section>
+</div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const defaults = {alpha:0.05,v5:-0.002,jstar:0.5,turns:30000,discard:2000,count:13};
+const RESONANCE = 1/5;
+const SAMPLE_STRIDE = 5;
+const SUBSTEPS_PER_TURN = 8;
+let lastRows = [], lastPhase = null, lastRun = null;
+
+function fmt(x,n=8){return Number.isFinite(x)?x.toFixed(n):"—";}
+function nextPow2(n){let p=1;while(p<n)p*=2;return p;}
+function fftTune(signal){
+  const n=nextPow2(signal.length), re=new Float64Array(n), im=new Float64Array(n);
+  let mean=0;for(let i=0;i<signal.length;i++)mean+=signal[i];mean/=signal.length;
+  for(let i=0;i<signal.length;i++) re[i]=(signal[i]-mean)*(0.5-0.5*Math.cos(2*Math.PI*i/(signal.length-1)));
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;
+    if(i<j){[re[i],re[j]]=[re[j],re[i]];}
+  }
+  for(let len=2;len<=n;len<<=1){
+    const angle=-2*Math.PI/len,wr0=Math.cos(angle),wi0=Math.sin(angle);
+    for(let i=0;i<n;i+=len){let wr=1,wi=0;
+      for(let j=0;j<len/2;j++){
+        const u=i+j,v=u+len/2,vr=re[v]*wr-im[v]*wi,vi=re[v]*wi+im[v]*wr;
+        re[v]=re[u]-vr;im[v]=im[u]-vi;re[u]+=vr;im[u]+=vi;
+        const nw=wr*wr0-wi*wi0;wi=wr*wi0+wi*wr0;wr=nw;
+      }
+    }
+  }
+  let peak=1,best=0;
+  for(let k=1;k<n/2;k++){const p=re[k]*re[k]+im[k]*im[k];if(p>best){best=p;peak=k;}}
+  const power=k=>re[k]*re[k]+im[k]*im[k];
+  let offset=0;
+  if(peak>0&&peak<n/2-1){
+    const a=Math.log(power(peak-1)+1e-300),b=Math.log(power(peak)+1e-300),c=Math.log(power(peak+1)+1e-300),den=a-2*b+c;
+    if(Math.abs(den)>1e-14)offset=.5*(a-c)/den;
+  }
+  return (peak+offset)/n;
+}
+
+function parameters(){
+  const p={alpha:Number($("alpha").value),v5:Number($("v5").value),jstar:Number($("jstar").value),turns:Math.floor(Number($("turns").value)),discard:Math.floor(Number($("discard").value)),count:Math.floor(Number($("count").value))};
+  p.turns=Math.floor(p.turns/SAMPLE_STRIDE)*SAMPLE_STRIDE;
+  p.discard=Math.floor(p.discard/SAMPLE_STRIDE)*SAMPLE_STRIDE;
+  if(!Object.values(p).every(Number.isFinite)||p.alpha===0||p.v5===0||p.jstar<=0||p.turns<5000||p.discard<0||p.discard>=p.turns||p.count<5||p.count>25){
+    throw new Error("Use nonzero α and V₅, Jfp > 0, at least 5,000 turns, 0 ≤ discard < turns, and 5–25 amplitudes.");
+  }
+  // Stable fifth-order phase: cos(5 psi_fp) = -sign(alpha*V5), when the weak-drive island exists.
+  p.psiFp=(p.alpha*p.v5<0)?0:Math.PI/5;
+  p.cosFp=Math.cos(5*p.psiFp);
+  p.delta=-(p.alpha*p.jstar+2.5*p.v5*Math.pow(p.jstar,1.5)*p.cosFp)/(2*Math.PI);
+  p.q0=RESONANCE+p.delta;
+  p.hJJ=p.alpha+3.75*p.v5*Math.sqrt(p.jstar)*p.cosFp;
+  p.hPP=-25*p.v5*Math.pow(p.jstar,2.5)*p.cosFp;
+  const omega2=p.hJJ*p.hPP;
+  if(!(omega2>0))throw new Error("The selected fixed point is not elliptic. Adjust α, V₅, or Jfp so HJJ·Hψψ > 0.");
+  p.qi=Math.sqrt(omega2)/(2*Math.PI);
+  p.qiLeading=(5/(2*Math.PI))*Math.pow(p.jstar,1.25)*Math.sqrt(Math.abs(p.alpha*p.v5));
+  p.halfWidth=2*Math.sqrt(Math.abs(p.v5)*Math.pow(p.jstar,2.5)/Math.abs(p.alpha));
+  p.fullWidth=2*p.halfWidth;
+  p.divisor=2*Math.abs(Math.sin(5*Math.PI*p.q0));
+  let sr=0,si=0;
+  for(let k=0;k<5;k++){sr+=Math.cos(10*Math.PI*p.q0*k);si+=Math.sin(10*Math.PI*p.q0*k);}
+  p.coherence=Math.hypot(sr,si);
+  if(p.qi*SAMPLE_STRIDE>=0.5)throw new Error("The island tune is too high for unaliased five-turn sampling (require 5 QI < 0.5). Reduce |αV₅| or Jfp.");
+  return p;
+}
+
+function vectorField(J,theta,p){
+  if(!(J>0))throw new Error("Action reached J ≤ 0; reduce the initial displacement or drive strength.");
+  const s=Math.sin(5*theta),c=Math.cos(5*theta),j15=Math.pow(J,1.5),j25=Math.pow(J,2.5);
+  return {
+    jdot:5*p.v5*j25*s,
+    tdot:2*Math.PI*p.delta+p.alpha*J+2.5*p.v5*j15*c,
+    a:12.5*p.v5*j15*s,
+    b:25*p.v5*j25*c,
+    c:p.alpha+3.75*p.v5*Math.sqrt(J)*c,
+    d:-12.5*p.v5*j15*s
+  };
+}
+
+// Implicit midpoint is a symplectic Runge–Kutta method for this canonical Hamiltonian system.
+function midpointStep(J0,t0,h,p){
+  let f0=vectorField(J0,t0,p);
+  let J1=J0+h*f0.jdot, t1=t0+h*f0.tdot;
+  for(let it=0;it<14;it++){
+    const Jm=.5*(J0+J1),tm=.5*(t0+t1),f=vectorField(Jm,tm,p);
+    const F1=J1-J0-h*f.jdot,F2=t1-t0-h*f.tdot;
+    const norm=Math.max(Math.abs(F1),Math.abs(F2));
+    if(norm<2e-13*(1+Math.abs(J1)+Math.abs(t1)))return [J1,t1];
+    const a=1-.5*h*f.a,b=-.5*h*f.b,c=-.5*h*f.c,d=1-.5*h*f.d,det=a*d-b*c;
+    if(!Number.isFinite(det)||Math.abs(det)<1e-14)break;
+    const dJ=(-F1*d+b*F2)/det;
+    const dt=(-a*F2+c*F1)/det;
+    J1+=dJ;t1+=dt;
+    if(!Number.isFinite(J1)||!Number.isFinite(t1))break;
+  }
+  throw new Error("Implicit-midpoint iteration failed. Reduce the drive strength or use a smaller step.");
+}
+
+function track(dJ,p){
+  let J=p.jstar+dJ,theta=p.psiFp;
+  const n=(p.turns-p.discard)/SAMPLE_STRIDE;
+  const actions=new Float64Array(n),angles=new Float64Array(n);
+  const h=1/SUBSTEPS_PER_TURN;
+  let sample=0;
+  for(let turn=1;turn<=p.turns;turn++){
+    for(let s=0;s<SUBSTEPS_PER_TURN;s++)[J,theta]=midpointStep(J,theta,h,p);
+    if(turn>p.discard&&((turn-p.discard)%SAMPLE_STRIDE===0)){
+      actions[sample]=J;angles[sample]=theta;sample++;
+    }
+  }
+  return {angles,actions};
+}
+
+function drawChart(canvas,series,opts={}){
+  const ctx=canvas.getContext("2d"),w=canvas.width,h=canvas.height;
+  ctx.clearRect(0,0,w,h);ctx.fillStyle="#fff";ctx.fillRect(0,0,w,h);
+  const pad={l:76,r:22,t:20,b:54},pw=w-pad.l-pad.r,ph=h-pad.t-pad.b;
+  const allX=series.flatMap(s=>Array.from(s.x)),allY=series.flatMap(s=>Array.from(s.y)).filter(Number.isFinite);
+  if(!allX.length||!allY.length){ctx.fillStyle="#666";ctx.font="16px Arial";ctx.fillText("Run simulation to display this chart.",pad.l,h/2);return;}
+  let xmin=opts.xmin!==undefined?opts.xmin:Math.min(...allX),xmax=opts.xmax!==undefined?opts.xmax:Math.max(...allX);
+  let ymin=opts.ymin!==undefined?opts.ymin:Math.min(...allY),ymax=opts.ymax!==undefined?opts.ymax:Math.max(...allY);
+  if(opts.yline!==undefined){ymin=Math.min(ymin,opts.yline);ymax=Math.max(ymax,opts.yline);}
+  if(xmin===xmax){xmin-=1;xmax+=1;}if(ymin===ymax){ymin-=.01;ymax+=.01;}
+  if(opts.ymin===undefined||opts.ymax===undefined){const ym=(ymax-ymin)*.12;ymin-=ym;ymax+=ym;}
+  const X=x=>pad.l+(x-xmin)/(xmax-xmin)*pw,Y=y=>pad.t+(ymax-y)/(ymax-ymin)*ph;
+  ctx.strokeStyle="#e2e2e2";ctx.fillStyle="#555";ctx.lineWidth=1;ctx.font="12px Arial";
+  for(let i=0;i<=5;i++){
+    const y=pad.t+i*ph/5,val=ymax-i*(ymax-ymin)/5;ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(w-pad.r,y);ctx.stroke();ctx.fillText(val.toFixed(opts.yDecimals??4),8,y+4);
+  }
+  for(let i=0;i<=5;i++){
+    const x=pad.l+i*pw/5,val=xmin+i*(xmax-xmin)/5;ctx.beginPath();ctx.moveTo(x,pad.t);ctx.lineTo(x,h-pad.b);ctx.stroke();ctx.fillText(val.toFixed(opts.xDecimals??3),x-16,h-pad.b+22);
+  }
+  ctx.strokeStyle="#555";ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,h-pad.b);ctx.lineTo(w-pad.r,h-pad.b);ctx.stroke();
+  if(opts.yline!==undefined){ctx.strokeStyle="#a45b35";ctx.setLineDash([7,5]);ctx.beginPath();ctx.moveTo(pad.l,Y(opts.yline));ctx.lineTo(w-pad.r,Y(opts.yline));ctx.stroke();ctx.setLineDash([]);}
+  for(const s of series){
+    const color=s.color||"#315f78";ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=1.7;
+    // Phase-space maps are scatter plots: no line is drawn between successive map points.
+    if(s.line!==false){ctx.beginPath();for(let i=0;i<s.x.length;i++){const xx=X(s.x[i]),yy=Y(s.y[i]);if(i===0)ctx.moveTo(xx,yy);else ctx.lineTo(xx,yy);}ctx.stroke();}
+    if(s.points){for(let i=0;i<s.x.length;i++){ctx.beginPath();ctx.arc(X(s.x[i]),Y(s.y[i]),s.radius||3,0,2*Math.PI);ctx.fill();}}
+  }
+  ctx.fillStyle="#333";ctx.font="13px Arial";ctx.textAlign="center";ctx.fillText(opts.xlabel||"",pad.l+pw/2,h-8);ctx.textAlign="left";
+  ctx.save();ctx.translate(17,h/2+35);ctx.rotate(-Math.PI/2);ctx.textAlign="center";ctx.fillText(opts.ylabel||"",0,0);ctx.restore();
+}
+
+function run(){
+  let p;
+  try{p=parameters();}catch(e){$("status").textContent=e.message;return;}
+  $("run").disabled=true;$("csv").disabled=true;$("status").textContent="Tracking the resonant Hamiltonian and sampling the five-turn map…";
+  setTimeout(()=>{
+    try{
+      const maxAmp=Math.min(.45*p.jstar,.70*p.halfWidth),minAmp=Math.max(1e-7,maxAmp*.002);
+      if(!(maxAmp>minAmp))throw new Error("The estimated island is too narrow for the selected action. Increase |V₅| or adjust Jfp and α.");
+      const amps=Array.from({length:p.count},(_,i)=>minAmp*Math.pow(maxAmp/minAmp,i/(p.count-1)));
+      lastRows=[];let phase=null;
+      for(const a of amps){
+        const tr=track(a,p);
+        // FFT frequency is cycles per five-turn sample; divide by 5 for tune per turn.
+        const q5=fftTune(tr.actions);
+        lastRows.push({amp:a,tune:q5/SAMPLE_STRIDE,sampledTune:q5});
+        phase=tr;
+      }
+      lastPhase=phase;lastRun=p;
+      $("qi").textContent=fmt(p.qi,8);
+      $("qnum").textContent=fmt(lastRows[0].tune,8);
+      $("divisor").textContent=fmt(p.divisor,7);
+      $("coherence").textContent=fmt(p.coherence,6)+" / 5";
+      $("results").innerHTML=lastRows.map(r=>`<tr><td>${r.amp.toFixed(6)}</td><td>${fmt(r.tune,8)}</td><td>${fmt(r.tune-p.qi,8)}</td></tr>`).join("");
+      drawChart($("tuneChart"),[{x:lastRows.map(r=>r.amp),y:lastRows.map(r=>r.tune),points:true,line:true,radius:3}],{yline:p.qi,xlabel:"Initial action displacement |J₀ − Jfp|",ylabel:"Island tune QI (per turn)",xDecimals:4,yDecimals:5});
+      const stride=Math.max(1,Math.floor(lastPhase.actions.length/9000)),px=[],py=[];
+      for(let i=0;i<lastPhase.actions.length;i+=stride){
+        let a=lastPhase.angles[i]/(2*Math.PI);
+        a=((a+0.5)%1+1)%1-0.5;
+        px.push(a);py.push(lastPhase.actions[i]);
+      }
+      drawChart($("phaseChart"),[{x:px,y:py,color:"#a45b35",points:true,line:false,radius:1.65}],{xmin:-.5,xmax:.5,xDecimals:2,xlabel:"Resonant angle ψ/(2π), wrapped to [−0.5, 0.5)",ylabel:"Action J",yDecimals:4});
+      const delta=p.delta,q0=p.q0;
+      const widthApprox=p.halfWidth;
+      $("diagnostics").textContent=`Fixed point: Jfp = ${fmt(p.jstar,6)}, ψfp = ${fmt(p.psiFp,6)} rad. The bare tune is Q₀ = 1/5 + δ = ${fmt(q0,8)}, with δ = ${fmt(delta,8)}. The fifth-order divisor is D₅ = |1 − exp(i10πQ₀)| = ${fmt(p.divisor,8)}; the five successive resonant phasors add to ${fmt(p.coherence,6)} out of a maximum of 5. The leading pendulum estimate is a half-width ΔJhalf ≈ 2√(|V₅|Jfp^(5/2)/|α|) = ${fmt(widthApprox,6)} (full width ≈ ${fmt(p.fullWidth,6)}). The leading weak-drive estimate is QI ≈ (5/2π)Jfp^(5/4)√|αV₅| = ${fmt(p.qiLeading,8)}. The displayed linearized tune uses the full J-dependent Hessian, HJJ = α + (15/4)V₅√Jfp cos(5ψfp), giving QI = ${fmt(p.qi,8)}.`;
+      $("csv").disabled=false;
+      $("status").textContent=`Complete: ${p.turns.toLocaleString()} turns, sampled every 5 turns (${(p.turns-p.discard)/5} samples per particle). Q₀ = ${q0.toFixed(6)}; fixed-point phase = ${p.psiFp.toFixed(5)} rad.`;
+    }catch(e){$("status").textContent="Simulation error: "+e.message;}
+    $("run").disabled=false;
+  },30);
+}
+
+$("run").addEventListener("click",run);
+$("reset").addEventListener("click",()=>{for(const [k,v] of Object.entries(defaults))$(k).value=v;updateOutputs();run();});
+$("csv").addEventListener("click",()=>{
+  if(!lastRun||!lastRows.length)return;
+  const p=lastRun;
+  const head=["initial_action_displacement","measured_QI_per_turn","sampled_frequency_cycles_per_5_turns","difference_from_linearized_QI"];
+  const rows=[head.join(","),...lastRows.map(r=>[r.amp,r.tune,r.sampledTune,r.tune-p.qi].join(","))];
+  rows.unshift(`# sample_stride_turns=${SAMPLE_STRIDE}`,`# alpha=${p.alpha}`,`# V5=${p.v5}`,`# Jfp=${p.jstar}`,`# deltaQ=${p.delta}`,`# bare_tune_Q0=${p.q0}`,`# linearized_QI=${p.qi}`,`# leading_QI=${p.qiLeading}`,`# small_divisor_D5=${p.divisor}`,`# coherent_five_turn_factor=${p.coherence}`);
+  const a=document.createElement("a"),url=URL.createObjectURL(new Blob([rows.join("\n")],{type:"text/csv"}));a.href=url;a.download="fifth_order_five_turn_data.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+function updateOutputs(){
+  $("alphaOut").textContent=Number($("alpha").value).toFixed(5);
+  $("v5Out").textContent=Number($("v5").value).toFixed(5);
+  $("jOut").textContent=Number($("jstar").value).toFixed(3);
+}
+for(const id of ["alpha","v5","jstar"])$(id).addEventListener("input",updateOutputs);
+updateOutputs();
+drawChart($("tuneChart"),[],{xlabel:"Initial action displacement",ylabel:"Island tune"});
+drawChart($("phaseChart"),[],{xmin:-.5,xmax:.5,xlabel:"Resonant angle ψ/(2π)",ylabel:"Action J"});
+window.addEventListener("error",event=>{const status=$("status");if(status)status.textContent="Page error: "+(event.message||"An unexpected error occurred.");});
+</script>
+</body>
+</html>
